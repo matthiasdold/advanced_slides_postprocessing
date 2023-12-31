@@ -1,4 +1,5 @@
 import re
+from html import unescape
 from pathlib import Path
 
 import requests
@@ -45,6 +46,7 @@ def add_plotlyjs(
     """
     logger.debug("Fetching latest plotly version")
     version = fetch_latest_plotly()
+    logger.debug(f"Latest version is {version}")
 
     if embed:
         logger.debug("Embedding plotly.js")
@@ -58,13 +60,13 @@ def add_plotlyjs(
     # store under the dist/ folder
     else:
         logger.debug("Saving plotly.js to ./dist")
-        open(f"./dist/plotly-{version}.min.js", "w").write(
+        open(path.joinpath(f"./dist/plotly-{version}.min.js"), "w").write(
             requests.get(f"https://cdn.plot.ly/plotly-{version}.min.js").text
         )
 
         return re.sub(
             r"<head>",
-            rf"<head>\n<script src=\"dist/plotly-{version}.min.js\"></script>",
+            rf'<head>\n<script src="dist/plotly-{version}.min.js"></script>',
             html,
         )
 
@@ -102,12 +104,39 @@ def replace_images_with_html(
                 f"Could not find {path}. Continue without replacement"
             )
         else:
-            clean_html = re.search(
-                r"<body>(.*)</body>", load_html(path), re.DOTALL
-            ).group(1)
-            html = re.sub(img, clean_html, html)
+            div, script = extract_plotly_html(path)
+            html = html.replace(
+                img, div
+            )  # use plain replace as with re.sub, some escape sequences are problematic
+            html = html.replace("</body>", f"{script}\n</body>")
 
     return html
+
+
+def extract_plotly_html(path: Path) -> tuple[str, str]:
+    """
+    From a plotly html file, extract the figure div and separate the script
+    generating the figure.
+    """
+
+    html = re.search(
+        r'(<div .* class="plotly-graph.*>.*</script>)\s*</div>',
+        load_html(path),
+        re.DOTALL,
+    ).group(1)
+    div = re.search(r"<div.*>.*</div>", html).group(0)
+    script = re.search(r"<script.*>.*</script>", html).group(0)
+
+    # the relevant parts if generated from a plotly json would look like this:
+    # fdiv = """
+    # <div {s} id='{chart_id}'></div>
+    #             <script>var Plotjson = '{j}';
+    #             var figure = JSON.parse(Plotjson);
+    #             Plotly.newPlot('{chart_id}', figure.data, figure.layout);</script>"""
+    #
+    #
+
+    return div, script
 
 
 def fetch_latest_plotly() -> str:
@@ -123,12 +152,16 @@ def process_index(path: Path, plotly_html_path_prefix: Path = Path(".")):
     html = load_html(path)
 
     logger.debug("adding plotly.js")
-    html = add_plotlyjs(html, path, embed=False)
+    html = add_plotlyjs(html, path.parent, embed=False)
 
     logger.debug("replacing images")
     html = replace_images_with_html(
         html, plotly_html_path_prefix=plotly_html_path_prefix
     )
+
+    # get rid of escape sequences
+    logger.debug("Unescaping")
+    html = unescape(html)
 
     logger.debug("writing out embedded html")
     open(path.parent.joinpath("index_embedded.html"), "w").write(html)

@@ -36,4 +36,4 @@ This will also adjust the content in `index.html` to include `plotly.js`, and wi
 
 ## Development status
 
-- analyzing the the `example exports`
+[ ] tested with a single plot, test with multiple next
